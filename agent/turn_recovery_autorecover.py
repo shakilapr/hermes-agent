@@ -16,9 +16,14 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
-from agent.error_classifier import TRANSIENT_REASONS
+from agent.error_classifier import FailoverReason
 
 logger = logging.getLogger("agent.conversation_loop")
+
+# Transient transport verdicts: the provider is expected back. Everything else (auth, format,
+# content policy, billing, entitlement, overflow, model-not-found ...) is deterministic for this
+# request and stays out.
+_LADDER_REASONS = frozenset({FailoverReason.overloaded, FailoverReason.server_error, FailoverReason.timeout})
 
 _LADDER_BASE_DELAY_S = 15.0
 _LADDER_CAP_S = 60.0
@@ -52,10 +57,9 @@ def ladder_wait_seconds(cycle: int, api_error: Any) -> float:
 
 
 def ladder_eligible(agent: Any, classified: Any) -> bool:
-    """True when the ladder may engage: cycles configured, a transient transport verdict (auth, format,
-    policy, billing, overflow ... are deterministic for this request), and no answer text streamed to
-    the user yet (delivered text is never replayed by this path)."""
-    if auto_recovery_cycles(agent) <= 0 or classified.reason not in TRANSIENT_REASONS:
+    """True when the ladder may engage: cycles configured, a transient transport verdict, and no
+    answer text streamed to the user yet (delivered text is never replayed by this path)."""
+    if auto_recovery_cycles(agent) <= 0 or classified.reason not in _LADDER_REASONS:
         return False
     streamed = getattr(agent, "_current_streamed_assistant_text", "") or ""
     return not agent._has_content_after_think_block(streamed)
@@ -109,4 +113,21 @@ def auto_recover_after_exhaustion(
         return {"action": "return", "result": interrupted}
     if _retry.restart_with_redirected_messages:
         return {"action": "break"}
+
+    # Circular recovery: reset to primary before continuing next recovery cycle so the ladder
+    # tests primary and traverses down again rather than hammering only the bottom provider.
+    rt = getattr(agent, "_primary_runtime", None)
+    if rt:
+        try:
+            from agent.route_binding import reinstall_runtime_snapshot
+            reinstall_runtime_snapshot(agent, rt)
+            agent._fallback_index = 0
+            agent._fallback_activated = False
+            agent._fallback_activated_at = None
+            if getattr(agent, "_unavailable_fallback_keys", None) is not None:
+                agent._unavailable_fallback_keys.clear()
+            logger.info("Auto-recovery cycle %d: reset to primary %s (%s) for next attempt", cycle, agent.model, agent.provider)
+        except Exception as e:
+            logger.debug("Auto-recovery reset to primary failed: %s", e)
+
     return {"action": "continue"}
