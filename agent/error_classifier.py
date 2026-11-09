@@ -161,6 +161,8 @@ _OVERLOADED_PATTERNS = (
     # CommandCode's 429 body for an unavailable upstream model — the key is healthy (#117111).
     "upstream model provider is temporarily unavailable. please try again in a moment.",
     "at capacity", "over capacity",
+    "no one is selling", "within your provider.max_price", "no one started answering",
+    "upstream provider is temporarily unavailable",
 )
 
 # Usage-limit patterns that need disambiguation (billing OR rate_limit), and
@@ -476,6 +478,7 @@ _V_SSL_CERT = _v(_R.ssl_cert_verification, **_ABORT_FALLBACK)
 _V_CONTEXT_OVERFLOW = _v(_R.context_overflow, should_compress=True)
 _V_PAYLOAD_TOO_LARGE = _v(_R.payload_too_large, should_compress=True)
 _V_OVERLOADED, _V_SERVER_ERROR, _V_TIMEOUT, _V_UNKNOWN = map(_v, (_R.overloaded, _R.server_error, _R.timeout, _R.unknown))
+_V_OVERLOADED_FALLBACK = _v(_R.overloaded, retryable=True, should_fallback=True)
 _V_IMAGE_TOO_LARGE, _V_IMAGE_CORRUPT = _v(_R.image_too_large), _v(_R.image_corrupt)
 _V_MULTIMODAL, _V_INVALID_ENCRYPTED = _v(_R.multimodal_tool_content_unsupported), _v(_R.invalid_encrypted_content)
 _V_REASONING_MANDATORY = _v(_R.reasoning_mandatory, should_compress=False, should_fallback=False)
@@ -609,6 +612,7 @@ _404_RULES = (
 # 400 tail after the deterministic request-shape checks. Some providers return
 # model-not-found / rate-limit / billing as 400 instead of 404/429/402.
 _400_TAIL_RULES = _OVERFLOW_AS_5XX_RULES + (
+    (_OVERLOADED_PATTERNS, _V_OVERLOADED_FALLBACK),
     (_PROVIDER_POLICY_BLOCKED_PATTERNS, _V_POLICY_BLOCKED), (_MODEL_NOT_FOUND_PATTERNS, _V_MODEL_NOT_FOUND),
     (_RATE_LIMIT_PATTERNS, _V_RATE_LIMIT), (_BILLING_PATTERNS, _billing_hints),
 )
