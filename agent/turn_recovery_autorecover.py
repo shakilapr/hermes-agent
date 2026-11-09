@@ -113,4 +113,21 @@ def auto_recover_after_exhaustion(
         return {"action": "return", "result": interrupted}
     if _retry.restart_with_redirected_messages:
         return {"action": "break"}
+
+    # Circular recovery: reset to primary before continuing next recovery cycle so the ladder
+    # tests primary and traverses down again rather than hammering only the bottom provider.
+    rt = getattr(agent, "_primary_runtime", None)
+    if rt:
+        try:
+            from agent.route_binding import reinstall_runtime_snapshot
+            reinstall_runtime_snapshot(agent, rt)
+            agent._fallback_index = 0
+            agent._fallback_activated = False
+            agent._fallback_activated_at = None
+            if getattr(agent, "_unavailable_fallback_keys", None) is not None:
+                agent._unavailable_fallback_keys.clear()
+            logger.info("Auto-recovery cycle %d: reset to primary %s (%s) for next attempt", cycle, agent.model, agent.provider)
+        except Exception as e:
+            logger.debug("Auto-recovery reset to primary failed: %s", e)
+
     return {"action": "continue"}
