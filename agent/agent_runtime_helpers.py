@@ -1433,6 +1433,40 @@ def restore_primary_runtime(agent) -> bool:
         agent._fallback_index = 0
         _revert_credential_rotation(agent)
         return False
+
+    # Cache-aware sticky fallback: preserve active prompt cache unless idle > 20 minutes (1200s)
+    FALLBACK_CACHE_STICKY_SECONDS = 1200.0
+    now = time.time()
+    last_turn_at = getattr(agent, "_last_turn_finished_at", None)
+    if last_turn_at is None:
+        cli = getattr(agent, "_cli", None) or getattr(agent, "cli", None)
+        last_turn_at = getattr(cli, "_last_turn_finished_at", None) if cli else None
+    if last_turn_at is None:
+        last_turn_at = getattr(agent, "_current_turn_timestamp", None)
+
+    if last_turn_at is not None:
+        elapsed = now - last_turn_at
+        if 0 <= elapsed < FALLBACK_CACHE_STICKY_SECONDS:
+            logger.info(
+                "Preserving prompt cache: staying on fallback %s via %s (last turn was %.1fs ago < 20m)",
+                getattr(agent, "model", ""),
+                getattr(agent, "provider", ""),
+                elapsed,
+            )
+            return False
+        else:
+            logger.info(
+                "Prompt cache expired (last turn was %.1fs ago >= 20m); restoring primary runtime",
+                elapsed,
+            )
+    else:
+        agent._last_turn_finished_at = now
+        logger.info(
+            "Preserving prompt cache: staying on fallback %s via %s (fallback active)",
+            getattr(agent, "model", ""),
+            getattr(agent, "provider", ""),
+        )
+        return False
     rt = agent._primary_runtime
     primary_provider = str((rt or {}).get("provider") or "").strip().lower()
     primary_model = str((rt or {}).get("model") or "").strip()
