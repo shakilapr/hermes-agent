@@ -194,6 +194,9 @@ class CLIStatusBarMixin:
         agent = getattr(self, "agent", None)
         # Prefer the agent's model name — it updates on fallback; self.model never changes.
         model_name = (getattr(agent, "model", None) or self.model or t("cli.shared.unknown"))
+        provider_raw = str(getattr(agent, "provider", "") or getattr(self, "provider", "") or "")
+        provider_name = provider_raw.removeprefix("custom:").strip()
+
         # Friendly display: reverse-alias from config ``model_aliases:`` first (turns long
         # Palantir RIDs into the user's short name), else slash/length truncation.
         model_short = _reverse_alias_for_display(model_name)
@@ -203,8 +206,15 @@ class CLIStatusBarMixin:
             from hermes_cli.model_switch import format_model_for_display
             model_short = format_model_for_display(model_short)
         model_short = model_short.removesuffix(".gguf")
-        if len(model_short) > 26:
-            model_short = f"{model_short[:23]}..."
+
+        import re
+        model_short = re.sub(r'(?i)^deepseek[-_]?', 'ds-', model_short)
+        model_short = re.sub(r'(?i)\\bdeepseek[-_]?', 'ds-', model_short)
+        if provider_name and f"[{provider_name}]" not in model_short:
+            model_short = f"{model_short} [{provider_name}]"
+
+        if len(model_short) > 34:
+            model_short = f"{model_short[:31]}..."
 
         prompt_start = getattr(self, "_prompt_start_time", None)
         turn_live = prompt_start is not None
